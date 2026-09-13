@@ -6,7 +6,9 @@ import { buildAnalytics } from './analytics.js'
 
 const PORT = Number(process.env.PORT) || 3000
 const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
-const VIBE_APP_KEY = process.env.VIBE_APP_KEY
+// `vibe_app_local` is the project secret name. The uppercase alias keeps local
+// deployments compatible with conventional environment naming.
+const VIBE_APP_KEY = process.env.vibe_app_local || process.env.VIBE_APP_KEY
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
 const MAX_DEALS = 5000
 
@@ -31,7 +33,7 @@ server.listen(PORT, '0.0.0.0', () => console.log(`b24-sales-report listening on 
 async function handleDashboard(request, response, url) {
   if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed' })
   if (!VIBE_APP_KEY || !VIBE_APP_KEY.startsWith('vibe_app_')) {
-    throw publicError(503, 'APP_KEY_MISSING', 'Секрет VIBE_APP_KEY не настроен на сервере.')
+    throw publicError(503, 'APP_KEY_MISSING', 'Секрет vibe_app_local не настроен на сервере.')
   }
 
   const bearer = extractBearer(request.headers['x-vibe-authorization'])
@@ -155,4 +157,3 @@ function json(response, status, body) {
 function contentType(extension) {
   return ({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' })[extension] || 'application/octet-stream'
 }
-
