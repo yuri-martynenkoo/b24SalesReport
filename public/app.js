@@ -29,8 +29,8 @@ async function loadDashboard() {
   setLoading(true)
   try {
     const response = await fetch(`/api/dashboard?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { credentials: 'same-origin' })
-    const body = await response.json()
-    if (!response.ok) throw new Error(body.error || 'Неизвестная ошибка')
+    const body = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(errorMessage(body))
     render(body)
   } catch (error) {
     showError(error.message)
@@ -53,10 +53,19 @@ function render(data) {
   elements.stages.replaceChildren(...data.stages.map(stageRow))
   elements.recent.replaceChildren(...data.recent.map(dealRow))
   elements.empty.classList.toggle('hidden', data.recent.length > 0)
-  elements['status'].textContent = data.truncated
+  const warning = Array.isArray(data.warnings) ? data.warnings.find((item) => item?.message) : null
+  elements['status'].textContent = warning?.message || (data.truncated
     ? 'Показаны первые 5 000 сделок. Сузьте период для точного итога.'
-    : `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`
+    : `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`)
   notifyFrameHeight()
+}
+
+function errorMessage(body) {
+  if (typeof body?.error === 'string') return body.error
+  if (typeof body?.error?.message === 'string') return body.error.message
+  if (typeof body?.message === 'string') return body.message
+  if (typeof body?.error?.code === 'string') return `Ошибка сервиса: ${body.error.code}`
+  return 'Неизвестная ошибка. Попробуйте обновить данные.'
 }
 
 function stageRow(stage) {
@@ -165,4 +174,3 @@ function notifyFrameHeight() {
 }
 
 new ResizeObserver(notifyFrameHeight).observe(document.body)
-

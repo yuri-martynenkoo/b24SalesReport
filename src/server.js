@@ -16,7 +16,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`)
     if (url.pathname === '/health') return json(response, 200, { ok: true })
-    if (url.pathname === '/api/dashboard') return handleDashboard(request, response, url)
+    if (url.pathname === '/api/dashboard') return await handleDashboard(request, response, url)
     if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed' })
     return serveStatic(response, url.pathname, request.method === 'HEAD')
   } catch (error) {
@@ -57,7 +57,7 @@ async function handleDashboard(request, response, url) {
   const deals = Array.isArray(dealsEnvelope.data) ? dealsEnvelope.data : []
   const categoryIds = [...new Set(deals.map((deal) => Number(deal.categoryId) || 0))]
 
-  const [usersEnvelope, ...stageEnvelopes] = await Promise.all([
+  const [usersResult, ...stageResults] = await Promise.allSettled([
     vibeFetch('/v1/users?limit=5000&select=id,name,lastName,email', headers),
     ...categoryIds.map((categoryId) => {
       const entityId = categoryId === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${categoryId}`
@@ -65,8 +65,21 @@ async function handleDashboard(request, response, url) {
     }),
   ])
 
-  const users = Array.isArray(usersEnvelope.data) ? usersEnvelope.data : []
-  const stages = stageEnvelopes.flatMap((envelope) => Array.isArray(envelope.data) ? envelope.data : [])
+  const rejectedStage = stageResults.find((result) => result.status === 'rejected')
+  if (rejectedStage) throw rejectedStage.reason
+
+  let users = identity.currentUser ? [identity.currentUser] : []
+  let responsibleNamesAvailable = true
+  if (usersResult.status === 'fulfilled') {
+    users = Array.isArray(usersResult.value.data) ? usersResult.value.data : users
+  } else if (usersResult.reason?.code === 'SCOPE_DENIED') {
+    responsibleNamesAvailable = false
+    console.warn('users_scope_unavailable', safeError(usersResult.reason))
+  } else {
+    throw usersResult.reason
+  }
+
+  const stages = stageResults.flatMap((result) => Array.isArray(result.value.data) ? result.value.data : [])
   const total = Number(dealsEnvelope.meta?.total)
   const analytics = buildAnalytics(deals, stages, users, { truncated: Number.isFinite(total) && total > deals.length })
 
@@ -77,6 +90,10 @@ async function handleDashboard(request, response, url) {
       name: identity.currentUser?.name || decodeHeader(request.headers['x-vibe-user-name-encoded']) || 'Сотрудник',
       portal: identity.portal?.domain || identity.portal || null,
     },
+    warnings: responsibleNamesAvailable ? [] : [{
+      code: 'RESPONSIBLE_NAMES_UNAVAILABLE',
+      message: 'Имена ответственных недоступны текущему ключу; показаны идентификаторы сотрудников.',
+    }],
   })
 }
 
