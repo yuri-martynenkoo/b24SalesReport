@@ -9,9 +9,10 @@ export function amountByCurrency(items) {
   }, {})
 }
 
-export function buildAnalytics(deals, stages, users, { truncated = false } = {}) {
+export function buildAnalytics(deals, stages, users, categories = [], { truncated = false } = {}) {
   const stageMap = new Map(stages.map((stage) => [stageKey(stage.categoryId, stage.statusId), stage]))
   const userMap = new Map(users.map((user) => [String(user.id), user]))
+  const categoryMap = new Map(categories.map((category) => [Number(category.id) || 0, category]))
 
   const normalized = deals.map((deal) => {
     const stage = stageMap.get(stageKey(deal.categoryId, deal.stageId)) || {
@@ -22,6 +23,8 @@ export function buildAnalytics(deals, stages, users, { truncated = false } = {})
       sort: 9999,
     }
     const responsible = userMap.get(String(deal.assignedById))
+    const categoryId = Number(deal.categoryId) || 0
+    const category = categoryMap.get(categoryId)
     return {
       ...deal,
       amount: Number(deal.amount) || 0,
@@ -33,6 +36,8 @@ export function buildAnalytics(deals, stages, users, { truncated = false } = {})
         sort: Number(stage.sort) || 0,
       },
       responsibleName: displayUser(responsible, deal.assignedById),
+      responsibleDepartment: displayDepartment(responsible),
+      categoryName: category?.name || (categoryId === 0 ? 'Общее' : `Направление #${categoryId}`),
     }
   })
 
@@ -46,6 +51,7 @@ export function buildAnalytics(deals, stages, users, { truncated = false } = {})
       grouped.set(key, {
         stageId: deal.stage.id,
         categoryId: Number(deal.categoryId) || 0,
+        categoryName: deal.categoryName,
         name: deal.stage.name,
         color: deal.stage.color,
         semantics: deal.stage.semantics,
@@ -97,8 +103,19 @@ function displayUser(user, fallbackId) {
   return fullName || user.fullName || user.email || `Сотрудник #${user.id}`
 }
 
+function displayDepartment(user) {
+  if (!user) return 'Подразделение недоступно'
+  const included = user.department || user.departments
+  if (typeof included === 'string') return included
+  if (Array.isArray(included)) {
+    const names = included.map((item) => typeof item === 'string' ? item : item?.name).filter(Boolean)
+    if (names.length) return names.join(', ')
+  }
+  if (user.departmentName) return user.departmentName
+  return 'Подразделение не указано'
+}
+
 function normalizeColor(color) {
   const value = String(color || '').trim()
   return /^#[0-9a-f]{6}$/i.test(value) ? value : '#94A3B8'
 }
-

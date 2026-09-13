@@ -14,7 +14,9 @@ test('builds stage totals and KPIs using stage semantics', () => {
     { categoryId: 0, statusId: 'WON', name: 'Успех', semantics: 'S', sort: 20 },
     { categoryId: 0, statusId: 'LOSE', name: 'Провал', semantics: 'F', sort: 30 },
   ]
-  const result = buildAnalytics(deals, stages, [{ id: 7, name: 'Иван', lastName: 'Иванов' }])
+  const users = [{ id: 7, name: 'Иван', lastName: 'Иванов', departments: [{ id: 5, name: 'Отдел продаж' }] }]
+  const categories = [{ id: 0, name: 'Общее' }]
+  const result = buildAnalytics(deals, stages, users, categories)
 
   assert.deepEqual(result.kpis.openAmounts, { RUB: 100 })
   assert.equal(result.kpis.wonCount, 2)
@@ -22,5 +24,6 @@ test('builds stage totals and KPIs using stage semantics', () => {
   assert.equal(result.stages.find((stage) => stage.stageId === 'WON').count, 2)
   assert.equal(result.recent[0].id, 3)
   assert.equal(result.recent[0].responsibleName, 'Сотрудник #8')
+  assert.equal(result.recent.find((deal) => deal.assignedById === 7).responsibleDepartment, 'Отдел продаж')
+  assert.equal(result.recent[0].categoryName, 'Общее')
 })
-

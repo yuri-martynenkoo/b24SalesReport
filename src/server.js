@@ -11,6 +11,7 @@ const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
 const VIBE_APP_KEY = process.env.vibe_app_local || process.env.VIBE_APP_KEY
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
 const MAX_DEALS = 5000
+const VIBE_SERVER_ID = process.env.VIBE_SERVER_ID || 'bb4fa4c9-bdd8-43eb-ac36-01318e09a47c'
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -40,9 +41,14 @@ async function handleDashboard(request, response, url) {
   if (!bearer) throw publicError(401, 'AUTH_REQUIRED', 'Откройте приложение из Битрикс24 и авторизуйтесь повторно.')
 
   const { from, to } = validatePeriod(url.searchParams.get('from'), url.searchParams.get('to'))
+  const selectedCategoryId = validateCategory(url.searchParams.get('categoryId'))
   const headers = { 'X-Api-Key': VIBE_APP_KEY, Authorization: `Bearer ${bearer}` }
-  const meEnvelope = await vibeFetch('/v1/me', headers)
+  const [meEnvelope, categoriesEnvelope] = await Promise.all([
+    vibeFetch('/v1/me', headers),
+    vibeFetch('/v1/categories/2?limit=500&sort=sort&select=id,name,sort,isDefault', headers),
+  ])
   const identity = meEnvelope.data || {}
+  const categories = normalizeCategories(categoriesEnvelope.data)
 
   const dealParams = new URLSearchParams({
     limit: String(MAX_DEALS),
@@ -52,13 +58,15 @@ async function handleDashboard(request, response, url) {
   })
   dealParams.set('filter[>=createdAt]', `${from}T00:00:00.000Z`)
   dealParams.set('filter[<=createdAt]', `${to}T23:59:59.999Z`)
+  if (selectedCategoryId !== null) dealParams.set('filter[categoryId]', String(selectedCategoryId))
 
   const dealsEnvelope = await vibeFetch(`/v1/deals?${dealParams}`, headers)
   const deals = Array.isArray(dealsEnvelope.data) ? dealsEnvelope.data : []
   const categoryIds = [...new Set(deals.map((deal) => Number(deal.categoryId) || 0))]
 
-  const [usersResult, ...stageResults] = await Promise.allSettled([
-    vibeFetch('/v1/users?limit=5000&select=id,name,lastName,email', headers),
+  const [usersResult, departmentsResult, ...stageResults] = await Promise.allSettled([
+    vibeFetch('/v1/users?limit=5000&select=id,name,lastName,secondName,departmentId,workPosition', headers),
+    vibeFetch('/v1/departments?limit=5000&select=id,name', headers),
     ...categoryIds.map((categoryId) => {
       const entityId = categoryId === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${categoryId}`
       return vibeFetch(`/v1/statuses?limit=500&sort=sort&filter[entityId]=${encodeURIComponent(entityId)}`, headers)
@@ -68,32 +76,90 @@ async function handleDashboard(request, response, url) {
   const rejectedStage = stageResults.find((result) => result.status === 'rejected')
   if (rejectedStage) throw rejectedStage.reason
 
-  let users = identity.currentUser ? [identity.currentUser] : []
+  const currentUser = currentUserFromRequest(identity, request.headers)
+  let users = currentUser ? [currentUser] : []
   let responsibleNamesAvailable = true
+  let departmentsAvailable = departmentsResult.status === 'fulfilled'
   if (usersResult.status === 'fulfilled') {
     users = Array.isArray(usersResult.value.data) ? usersResult.value.data : users
   } else if (usersResult.reason?.code === 'SCOPE_DENIED') {
-    responsibleNamesAvailable = false
+    const assignedIds = [...new Set(deals.slice(0, 15).map((deal) => String(deal.assignedById || '')).filter(Boolean))]
+    const fallbackUsers = await fetchBasicUsers(assignedIds)
+    users = mergeUsers(users, fallbackUsers)
+    responsibleNamesAvailable = fallbackUsers.length > 0
+    departmentsAvailable = false
     console.warn('users_scope_unavailable', safeError(usersResult.reason))
   } else {
     throw usersResult.reason
   }
 
+  if (departmentsResult.status === 'rejected' && departmentsResult.reason?.code !== 'SCOPE_DENIED') throw departmentsResult.reason
+  const departments = departmentsResult.status === 'fulfilled' && Array.isArray(departmentsResult.value.data)
+    ? departmentsResult.value.data
+    : []
+  users = attachDepartmentNames(users, departments)
+
   const stages = stageResults.flatMap((result) => Array.isArray(result.value.data) ? result.value.data : [])
   const total = Number(dealsEnvelope.meta?.total)
-  const analytics = buildAnalytics(deals, stages, users, { truncated: Number.isFinite(total) && total > deals.length })
+  const analytics = buildAnalytics(deals, stages, users, categories, { truncated: Number.isFinite(total) && total > deals.length })
 
   return json(response, 200, {
     ...analytics,
     period: { from, to },
+    selectedCategoryId,
+    categories,
     viewer: {
       name: identity.currentUser?.name || decodeHeader(request.headers['x-vibe-user-name-encoded']) || 'Сотрудник',
       portal: identity.portal?.domain || identity.portal || null,
     },
-    warnings: responsibleNamesAvailable ? [] : [{
-      code: 'RESPONSIBLE_NAMES_UNAVAILABLE',
-      message: 'Имена ответственных недоступны текущему ключу; показаны идентификаторы сотрудников.',
-    }],
+    warnings: [
+      ...(!responsibleNamesAvailable ? [{ code: 'RESPONSIBLE_NAMES_UNAVAILABLE', message: 'Не удалось получить ФИО некоторых ответственных.' }] : []),
+      ...(!departmentsAvailable ? [{ code: 'DEPARTMENTS_UNAVAILABLE', message: 'ФИО показаны; для вывода подразделений нужно повторно разрешить доступ к профилям сотрудников.' }] : []),
+    ],
+  })
+}
+
+function validateCategory(value) {
+  if (value === null || value === '') return null
+  if (!/^\d+$/.test(value)) throw publicError(400, 'INVALID_CATEGORY', 'Выберите корректное направление сделок.')
+  return Number(value)
+}
+
+function normalizeCategories(items) {
+  const categories = Array.isArray(items) ? items.map((item) => ({
+    id: Number(item.id) || 0,
+    name: item.name || ((Number(item.id) || 0) === 0 ? 'Общее' : `Направление #${item.id}`),
+    sort: Number(item.sort) || 0,
+  })) : []
+  if (!categories.some((item) => item.id === 0)) categories.unshift({ id: 0, name: 'Общее', sort: 0 })
+  return categories.sort((a, b) => a.sort - b.sort || a.id - b.id)
+}
+
+function currentUserFromRequest(identity, headers) {
+  const id = identity.currentUser?.id || identity.currentUser?.bitrixUserId || headers['x-vibe-user-id']
+  if (!id) return null
+  return { id, fullName: identity.currentUser?.name || decodeHeader(headers['x-vibe-user-name-encoded']) || null }
+}
+
+async function fetchBasicUsers(ids) {
+  const results = await Promise.allSettled(ids.filter((id) => id.length >= 2).map(async (id) => {
+    const envelope = await vibeFetch(`/v1/infra/servers/${encodeURIComponent(VIBE_SERVER_ID)}/b24-users?search=${encodeURIComponent(id)}`, { 'X-Api-Key': VIBE_APP_KEY })
+    const exact = Array.isArray(envelope.data) ? envelope.data.find((user) => String(user.id) === id) : null
+    return exact ? { id: exact.id, fullName: exact.name, workPosition: exact.position } : null
+  }))
+  return results.flatMap((result) => result.status === 'fulfilled' && result.value ? [result.value] : [])
+}
+
+function mergeUsers(primary, fallback) {
+  const users = new Map([...primary, ...fallback].map((user) => [String(user.id), user]))
+  return [...users.values()]
+}
+
+function attachDepartmentNames(users, departments) {
+  const names = new Map(departments.map((department) => [String(department.id), department.name]))
+  return users.map((user) => {
+    const ids = Array.isArray(user.departmentId) ? user.departmentId : Array.isArray(user.UF_DEPARTMENT) ? user.UF_DEPARTMENT : []
+    return { ...user, departments: ids.map((id) => ({ id, name: names.get(String(id)) })).filter((item) => item.name) }
   })
 }
 

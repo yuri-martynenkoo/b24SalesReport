@@ -28,7 +28,10 @@ async function loadDashboard() {
 
   setLoading(true)
   try {
-    const response = await fetch(`/api/dashboard?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { credentials: 'same-origin' })
+    const category = elements.category.value
+    const query = new URLSearchParams({ from, to })
+    if (category !== '') query.set('categoryId', category)
+    const response = await fetch(`/api/dashboard?${query}`, { credentials: 'same-origin' })
     const body = await response.json().catch(() => null)
     if (!response.ok) throw new Error(errorMessage(body))
     render(body)
@@ -49,6 +52,7 @@ function render(data) {
   elements['won-amount'].textContent = formatAmounts(data.kpis.wonAmounts)
   elements['average-amount'].textContent = formatAmounts(data.kpis.averageWonAmounts)
   elements['deal-total'].textContent = plural(data.totalDeals, 'сделка', 'сделки', 'сделок')
+  renderCategoryOptions(data.categories, data.selectedCategoryId)
 
   elements.stages.replaceChildren(...data.stages.map(stageRow))
   elements.recent.replaceChildren(...data.recent.map(dealRow))
@@ -74,7 +78,7 @@ function stageRow(stage) {
   row.innerHTML = `<span class="stage-dot"></span><div class="stage-main"><strong></strong><span></span></div><div class="stage-metric"><strong></strong><span></span></div>`
   row.querySelector('.stage-dot').style.background = stage.color
   row.querySelector('.stage-main strong').textContent = stage.name
-  row.querySelector('.stage-main span').textContent = `stageId: ${stage.stageId}`
+  row.querySelector('.stage-main span').textContent = `${stage.categoryName} · stageId: ${stage.stageId}`
   row.querySelector('.stage-metric strong').textContent = formatAmounts(stage.amounts)
   row.querySelector('.stage-metric span').textContent = plural(stage.count, 'сделка', 'сделки', 'сделок')
   return row
@@ -91,8 +95,29 @@ function dealRow(deal) {
   stage.textContent = deal.stage.name
   stage.title = `stageId: ${deal.stage.id}`
   stageCell.append(stage)
-  row.append(title, amount, stageCell, cell('', deal.responsibleName), cell('', formatDate(deal.createdAt)))
+  const responsible = document.createElement('td')
+  responsible.className = 'person-cell'
+  const personName = document.createElement('strong')
+  personName.textContent = deal.responsibleName
+  const department = document.createElement('span')
+  department.textContent = deal.responsibleDepartment
+  responsible.append(personName, department)
+  row.append(title, amount, cell('', deal.categoryName), stageCell, responsible, cell('', formatDate(deal.createdAt)))
   return row
+}
+
+function renderCategoryOptions(categories, selectedCategoryId) {
+  const selected = selectedCategoryId === null || selectedCategoryId === undefined ? '' : String(selectedCategoryId)
+  const options = [option('', 'Все направления'), ...(categories || []).map((category) => option(String(category.id), category.name))]
+  elements.category.replaceChildren(...options)
+  elements.category.value = selected
+}
+
+function option(value, label) {
+  const item = document.createElement('option')
+  item.value = value
+  item.textContent = label
+  return item
 }
 
 function cell(className, text) {
