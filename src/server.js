@@ -1,0 +1,158 @@
+import http from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { extname, join, normalize } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { buildAnalytics } from './analytics.js'
+
+const PORT = Number(process.env.PORT) || 3000
+const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
+const VIBE_APP_KEY = process.env.VIBE_APP_KEY
+const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
+const MAX_DEALS = 5000
+
+const server = http.createServer(async (request, response) => {
+  try {
+    const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`)
+    if (url.pathname === '/health') return json(response, 200, { ok: true })
+    if (url.pathname === '/api/dashboard') return handleDashboard(request, response, url)
+    if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed' })
+    return serveStatic(response, url.pathname, request.method === 'HEAD')
+  } catch (error) {
+    console.error('request_failed', safeError(error))
+    return json(response, error.statusCode || 500, {
+      error: error.publicMessage || 'Не удалось загрузить аналитику. Попробуйте ещё раз.',
+      code: error.code || 'INTERNAL_ERROR',
+    })
+  }
+})
+
+server.listen(PORT, '0.0.0.0', () => console.log(`b24-sales-report listening on ${PORT}`))
+
+async function handleDashboard(request, response, url) {
+  if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed' })
+  if (!VIBE_APP_KEY || !VIBE_APP_KEY.startsWith('vibe_app_')) {
+    throw publicError(503, 'APP_KEY_MISSING', 'Секрет VIBE_APP_KEY не настроен на сервере.')
+  }
+
+  const bearer = extractBearer(request.headers['x-vibe-authorization'])
+  if (!bearer) throw publicError(401, 'AUTH_REQUIRED', 'Откройте приложение из Битрикс24 и авторизуйтесь повторно.')
+
+  const { from, to } = validatePeriod(url.searchParams.get('from'), url.searchParams.get('to'))
+  const headers = { 'X-Api-Key': VIBE_APP_KEY, Authorization: `Bearer ${bearer}` }
+  const meEnvelope = await vibeFetch('/v1/me', headers)
+  const identity = meEnvelope.data || {}
+
+  const dealParams = new URLSearchParams({
+    limit: String(MAX_DEALS),
+    sort: '-createdAt',
+    select: 'id,title,amount,currency,stageId,categoryId,assignedById,createdAt,closed',
+    withTotal: 'true',
+  })
+  dealParams.set('filter[>=createdAt]', `${from}T00:00:00.000Z`)
+  dealParams.set('filter[<=createdAt]', `${to}T23:59:59.999Z`)
+
+  const dealsEnvelope = await vibeFetch(`/v1/deals?${dealParams}`, headers)
+  const deals = Array.isArray(dealsEnvelope.data) ? dealsEnvelope.data : []
+  const categoryIds = [...new Set(deals.map((deal) => Number(deal.categoryId) || 0))]
+
+  const [usersEnvelope, ...stageEnvelopes] = await Promise.all([
+    vibeFetch('/v1/users?limit=5000&select=id,name,lastName,email', headers),
+    ...categoryIds.map((categoryId) => {
+      const entityId = categoryId === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${categoryId}`
+      return vibeFetch(`/v1/statuses?limit=500&sort=sort&filter[entityId]=${encodeURIComponent(entityId)}`, headers)
+    }),
+  ])
+
+  const users = Array.isArray(usersEnvelope.data) ? usersEnvelope.data : []
+  const stages = stageEnvelopes.flatMap((envelope) => Array.isArray(envelope.data) ? envelope.data : [])
+  const total = Number(dealsEnvelope.meta?.total)
+  const analytics = buildAnalytics(deals, stages, users, { truncated: Number.isFinite(total) && total > deals.length })
+
+  return json(response, 200, {
+    ...analytics,
+    period: { from, to },
+    viewer: {
+      name: identity.currentUser?.name || decodeHeader(request.headers['x-vibe-user-name-encoded']) || 'Сотрудник',
+      portal: identity.portal?.domain || identity.portal || null,
+    },
+  })
+}
+
+async function vibeFetch(path, headers) {
+  const upstream = await fetch(`${VIBE_API}${path}`, { headers, signal: AbortSignal.timeout(30_000) })
+  const body = await upstream.json().catch(() => null)
+  if (!upstream.ok || body?.success === false) {
+    const error = publicError(upstream.status || 502, body?.error?.code || 'VIBE_API_ERROR', mapUpstreamMessage(upstream.status, body))
+    throw error
+  }
+  return body || {}
+}
+
+function validatePeriod(from, to) {
+  const today = new Date().toISOString().slice(0, 10)
+  const defaultFrom = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10)
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/
+  const safeFrom = from || defaultFrom
+  const safeTo = to || today
+  if (!datePattern.test(safeFrom) || !datePattern.test(safeTo) || safeFrom > safeTo) {
+    throw publicError(400, 'INVALID_PERIOD', 'Проверьте выбранный период: дата начала должна быть не позже даты окончания.')
+  }
+  return { from: safeFrom, to: safeTo }
+}
+
+async function serveStatic(response, pathname, headOnly) {
+  const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+  const normalized = normalize(relative)
+  if (normalized.startsWith('..') || normalize(join(PUBLIC_DIR, normalized)).startsWith(PUBLIC_DIR) === false) {
+    return json(response, 404, { error: 'Not found' })
+  }
+  try {
+    const body = await readFile(join(PUBLIC_DIR, normalized))
+    response.writeHead(200, {
+      'Content-Type': contentType(extname(normalized)),
+      'Cache-Control': normalized === 'index.html' ? 'no-store' : 'public, max-age=3600',
+      'Content-Security-Policy': "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors https:; base-uri 'none'; form-action 'self'",
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.end(headOnly ? undefined : body)
+  } catch (error) {
+    if (error.code === 'ENOENT') return json(response, 404, { error: 'Not found' })
+    throw error
+  }
+}
+
+function extractBearer(value) {
+  const match = /^Bearer\s+(vibe_session_[A-Za-z0-9._~-]+)$/.exec(String(value || ''))
+  return match?.[1] || null
+}
+
+function decodeHeader(value) {
+  try { return value ? decodeURIComponent(String(value)) : null } catch { return null }
+}
+
+function mapUpstreamMessage(status, body) {
+  const code = body?.error?.code
+  if (status === 401 || code === 'INVALID_SESSION' || code === 'TOKEN_MISSING') return 'Сессия истекла. Закройте и снова откройте приложение в Битрикс24.'
+  if (status === 403) return 'Недостаточно прав для чтения CRM. Проверьте скоуп crm и права пользователя в Битрикс24.'
+  if (status === 429) return 'Превышен лимит запросов. Подождите немного и обновите данные.'
+  return body?.error?.message || 'Сервис Битрикс24 временно недоступен.'
+}
+
+function publicError(statusCode, code, publicMessage) {
+  return Object.assign(new Error(code), { statusCode, code, publicMessage })
+}
+
+function safeError(error) {
+  return { name: error.name, code: error.code, statusCode: error.statusCode, message: error.message }
+}
+
+function json(response, status, body) {
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+  response.end(JSON.stringify(body))
+}
+
+function contentType(extension) {
+  return ({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' })[extension] || 'application/octet-stream'
+}
+
