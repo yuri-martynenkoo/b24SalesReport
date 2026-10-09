@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Аналитика продаж</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=5">
 </head>
 <body>
   <main class="app-shell">
@@ -14,29 +14,27 @@
       <div>
         <p class="eyebrow">CRM · Сделки</p>
         <h1>Аналитика продаж</h1>
-        <p id="viewer" class="subtitle">Данные в рамках ваших прав доступа</p>
       </div>
-      <button id="refresh" class="icon-button" type="button" aria-label="Обновить данные" title="Обновить данные">
-        <span aria-hidden="true">↻</span>
-      </button>
     </header>
 
-    <section class="filter-card" aria-labelledby="period-heading">
-      <div>
-        <h2 id="period-heading">Период создания сделок</h2>
-        <div class="preset-group" aria-label="Быстрый выбор периода">
-          <button class="preset" data-days="7" type="button">7 дней</button>
-          <button class="preset active" data-days="30" type="button">30 дней</button>
-          <button class="preset" data-days="90" type="button">90 дней</button>
-          <button class="preset" data-period="quarter" type="button">Квартал</button>
-        </div>
-      </div>
+    <section class="filter-card" aria-label="Фильтры сделок">
       <form id="period-form" class="date-form">
         <label>Направление
           <select id="category" name="categoryId"><option value="">Все направления</option></select>
         </label>
-        <label>С <input id="from" name="from" type="date" required></label>
-        <label>По <input id="to" name="to" type="date" required></label>
+        <fieldset class="period-fieldset">
+          <legend>Период создания сделок</legend>
+          <div class="period-controls">
+            <label>С <input id="from" name="from" type="date" required></label>
+            <label>По <input id="to" name="to" type="date" required></label>
+            <div class="preset-group" aria-label="Быстрый выбор периода">
+              <button class="preset" data-days="7" type="button">7 дней</button>
+              <button class="preset active" data-days="30" type="button">30 дней</button>
+              <button class="preset" data-days="90" type="button">90 дней</button>
+              <button class="preset" data-period="quarter" type="button">Квартал</button>
+            </div>
+          </div>
+        </fieldset>
         <button class="primary-button" type="submit">Применить</button>
       </form>
     </section>
@@ -51,14 +49,20 @@
     <div id="content" class="hidden">
       <section class="kpi-grid" aria-label="Ключевые показатели">
         <article class="kpi-card accent-blue">
-          <span class="kpi-label">Открытые сделки</span>
+          <span class="kpi-label">Сумма открытых сделок</span>
           <strong id="open-amount" class="kpi-value">—</strong>
-          <span id="open-count" class="kpi-note">—</span>
+        </article>
+        <article class="kpi-card accent-cyan">
+          <span class="kpi-label">Количество открытых сделок</span>
+          <strong id="open-count" class="kpi-value">—</strong>
         </article>
         <article class="kpi-card accent-green">
-          <span class="kpi-label">Выиграно за период</span>
+          <span class="kpi-label">Количество выигранных сделок</span>
           <strong id="won-count" class="kpi-value">—</strong>
-          <span id="won-amount" class="kpi-note">—</span>
+        </article>
+        <article class="kpi-card accent-teal">
+          <span class="kpi-label">Сумма выигранных сделок</span>
+          <strong id="won-amount" class="kpi-value">—</strong>
         </article>
         <article class="kpi-card accent-violet">
           <span class="kpi-label">Средний чек выигранных</span>
@@ -69,7 +73,7 @@
 
       <section class="panel stage-panel">
         <div class="panel-heading">
-          <div><p class="eyebrow">Воронка</p><h2>Сводка по стадиям</h2></div>
+          <div><p class="eyebrow">Воронка</p><h2>Сводка по стадиям</h2><p id="selected-category-name" class="panel-subtitle">Все направления</p></div>
           <span id="deal-total" class="badge"></span>
         </div>
         <div id="stages" class="stage-list"></div>
@@ -78,11 +82,18 @@
       <section class="panel">
         <div class="panel-heading">
           <div><p class="eyebrow">Активность</p><h2>Последние сделки</h2></div>
-          <span class="muted">до 15 записей</span>
+          <span class="muted">Последние 15 сделок за период</span>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Сделка</th><th>Сумма</th><th>Направление</th><th>Стадия</th><th>Ответственный</th><th>Создана</th></tr></thead>
+            <thead><tr>
+              <th scope="col" aria-sort="none"><button class="sort-button" data-sort="title" type="button">Сделка</button></th>
+              <th scope="col" aria-sort="none"><button class="sort-button" data-sort="amount" type="button">Сумма</button></th>
+              <th scope="col" aria-sort="none"><button class="sort-button" data-sort="categoryName" type="button">Направление</button></th>
+              <th scope="col" aria-sort="none"><button class="sort-button" data-sort="stage" type="button">Стадия</button></th>
+              <th scope="col" aria-sort="none"><button class="sort-button" data-sort="responsibleName" type="button">Ответственный</button></th>
+              <th scope="col" aria-sort="descending"><button class="sort-button" data-sort="createdAt" type="button">Создана</button></th>
+            </tr></thead>
             <tbody id="recent"></tbody>
           </table>
         </div>
@@ -90,6 +101,6 @@
       </section>
     </div>
   </main>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=5"></script>
 </body>
 </html>

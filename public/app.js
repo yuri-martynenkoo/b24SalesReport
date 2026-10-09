@@ -1,5 +1,9 @@
+import { sortDeals } from './sort-deals.js'
+
 const elements = Object.fromEntries([...document.querySelectorAll('[id]')].map((element) => [element.id, element]))
 const formatters = new Map()
+const sortState = { key: 'createdAt', direction: 'desc' }
+let recentDeals = []
 
 initializePeriod(30)
 loadDashboard()
@@ -9,13 +13,21 @@ elements['period-form'].addEventListener('submit', (event) => {
   document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active'))
   loadDashboard()
 })
-elements.refresh.addEventListener('click', loadDashboard)
 elements.retry.addEventListener('click', loadDashboard)
+for (const input of [elements.from, elements.to]) {
+  input.addEventListener('change', () => document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active')))
+}
 document.querySelectorAll('.preset').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.preset').forEach((item) => item.classList.toggle('active', item === button))
   if (button.dataset.period === 'quarter') initializeQuarter()
   else initializePeriod(Number(button.dataset.days))
   loadDashboard()
+}))
+document.querySelectorAll('.sort-button').forEach((button) => button.addEventListener('click', () => {
+  const key = button.dataset.sort
+  sortState.direction = sortState.key === key && sortState.direction === 'asc' ? 'desc' : 'asc'
+  sortState.key = key
+  renderRecent()
 }))
 
 async function loadDashboard() {
@@ -45,23 +57,36 @@ async function loadDashboard() {
 function render(data) {
   elements.error.classList.add('hidden')
   elements.content.classList.remove('hidden')
-  elements.viewer.textContent = [data.viewer?.name, data.viewer?.portal].filter(Boolean).join(' · ') || 'Данные в рамках ваших прав доступа'
   elements['open-amount'].textContent = formatAmounts(data.kpis.openAmounts)
-  elements['open-count'].textContent = plural(data.kpis.openCount, 'открытая сделка', 'открытые сделки', 'открытых сделок')
+  elements['open-count'].textContent = new Intl.NumberFormat('ru-RU').format(data.kpis.openCount)
   elements['won-count'].textContent = new Intl.NumberFormat('ru-RU').format(data.kpis.wonCount)
   elements['won-amount'].textContent = formatAmounts(data.kpis.wonAmounts)
   elements['average-amount'].textContent = formatAmounts(data.kpis.averageWonAmounts)
   elements['deal-total'].textContent = plural(data.totalDeals, 'сделка', 'сделки', 'сделок')
   renderCategoryOptions(data.categories, data.selectedCategoryId)
+  const selectedCategory = data.categories?.find((category) => Number(category.id) === data.selectedCategoryId)
+  elements['selected-category-name'].textContent = data.selectedCategoryId === null
+    ? 'Все направления'
+    : selectedCategory?.name || `Направление #${data.selectedCategoryId}`
 
   elements.stages.replaceChildren(...data.stages.map(stageRow))
-  elements.recent.replaceChildren(...data.recent.map(dealRow))
+  recentDeals = Array.isArray(data.recent) ? data.recent : []
+  renderRecent()
   elements.empty.classList.toggle('hidden', data.recent.length > 0)
   const warning = Array.isArray(data.warnings) ? data.warnings.find((item) => item?.message) : null
   elements['status'].textContent = warning?.message || (data.truncated
     ? 'Показаны первые 5 000 сделок. Сузьте период для точного итога.'
     : `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`)
   notifyFrameHeight()
+}
+
+function renderRecent() {
+  elements.recent.replaceChildren(...sortDeals(recentDeals, sortState.key, sortState.direction).map(dealRow))
+  for (const button of document.querySelectorAll('.sort-button')) {
+    const direction = button.dataset.sort === sortState.key ? sortState.direction : null
+    button.closest('th').setAttribute('aria-sort', direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none')
+    button.dataset.direction = direction || ''
+  }
 }
 
 function errorMessage(body) {
@@ -177,8 +202,7 @@ function localDate(date) {
 }
 
 function setLoading(loading) {
-  elements.refresh.disabled = loading
-  elements.refresh.classList.toggle('spinning', loading)
+  elements['period-form'].querySelector('button[type="submit"]').disabled = loading
   if (loading) {
     elements.status.textContent = 'Загружаем аналитику…'
     elements.error.classList.add('hidden')
