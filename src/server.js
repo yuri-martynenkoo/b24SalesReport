@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildAnalytics } from './analytics.js'
+import { dealDetailUrl, fetchAllDeals } from './deals.js'
 
 const PORT = Number(process.env.PORT) || 3000
 const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
@@ -10,7 +11,6 @@ const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
 // deployments compatible with conventional environment naming.
 const VIBE_APP_KEY = process.env.vibe_app_local || process.env.VIBE_APP_KEY
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url))
-const MAX_DEALS = 5000
 const VIBE_SERVER_ID = process.env.VIBE_SERVER_ID || 'bb4fa4c9-bdd8-43eb-ac36-01318e09a47c'
 
 const server = http.createServer(async (request, response) => {
@@ -50,18 +50,9 @@ async function handleDashboard(request, response, url) {
   const identity = meEnvelope.data || {}
   const categories = normalizeCategories(categoriesEnvelope.data)
 
-  const dealParams = new URLSearchParams({
-    limit: String(MAX_DEALS),
-    sort: '-createdAt',
-    select: 'id,title,amount,currency,stageId,categoryId,assignedById,createdAt,closed',
-    withTotal: 'true',
+  const deals = await fetchAllDeals((path) => vibeFetch(path, headers, 60_000), {
+    from, to, categoryId: selectedCategoryId,
   })
-  dealParams.set('filter[>=createdAt]', `${from}T00:00:00.000Z`)
-  dealParams.set('filter[<=createdAt]', `${to}T23:59:59.999Z`)
-  if (selectedCategoryId !== null) dealParams.set('filter[categoryId]', String(selectedCategoryId))
-
-  const dealsEnvelope = await vibeFetch(`/v1/deals?${dealParams}`, headers)
-  const deals = Array.isArray(dealsEnvelope.data) ? dealsEnvelope.data : []
   const categoryIds = [...new Set(deals.map((deal) => Number(deal.categoryId) || 0))]
 
   const [usersResult, departmentsResult, ...stageResults] = await Promise.allSettled([
@@ -83,7 +74,8 @@ async function handleDashboard(request, response, url) {
   if (usersResult.status === 'fulfilled') {
     users = Array.isArray(usersResult.value.data) ? usersResult.value.data : users
   } else if (usersResult.reason?.code === 'SCOPE_DENIED') {
-    const assignedIds = [...new Set(deals.slice(0, 15).map((deal) => String(deal.assignedById || '')).filter(Boolean))]
+    const recentDeals = [...deals].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 15)
+    const assignedIds = [...new Set(recentDeals.map((deal) => String(deal.assignedById || '')).filter(Boolean))]
     const fallbackUsers = await fetchBasicUsers(assignedIds)
     users = mergeUsers(users, fallbackUsers)
     responsibleNamesAvailable = fallbackUsers.length > 0
@@ -100,8 +92,11 @@ async function handleDashboard(request, response, url) {
   users = attachDepartmentNames(users, departments)
 
   const stages = stageResults.flatMap((result) => Array.isArray(result.value.data) ? result.value.data : [])
-  const total = Number(dealsEnvelope.meta?.total)
-  const analytics = buildAnalytics(deals, stages, users, categories, { truncated: Number.isFinite(total) && total > deals.length })
+  const analytics = buildAnalytics(deals, stages, users, categories)
+  analytics.recent = analytics.recent.map((deal) => ({
+    ...deal,
+    detailUrl: dealDetailUrl(identity.portal, deal.id),
+  }))
 
   return json(response, 200, {
     ...analytics,
@@ -163,8 +158,8 @@ function attachDepartmentNames(users, departments) {
   })
 }
 
-async function vibeFetch(path, headers) {
-  const upstream = await fetch(`${VIBE_API}${path}`, { headers, signal: AbortSignal.timeout(30_000) })
+async function vibeFetch(path, headers, timeoutMs = 30_000) {
+  const upstream = await fetch(`${VIBE_API}${path}`, { headers, signal: AbortSignal.timeout(timeoutMs) })
   const body = await upstream.json().catch(() => null)
   if (!upstream.ok || body?.success === false) {
     const error = publicError(upstream.status || 502, body?.error?.code || 'VIBE_API_ERROR', mapUpstreamMessage(upstream.status, body))

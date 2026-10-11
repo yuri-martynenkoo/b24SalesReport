@@ -9,7 +9,7 @@ export function amountByCurrency(items) {
   }, {})
 }
 
-export function buildAnalytics(deals, stages, users, categories = [], { truncated = false } = {}) {
+export function buildAnalytics(deals, stages, users, categories = []) {
   const stageMap = new Map(stages.map((stage) => [stageKey(stage.categoryId, stage.statusId), stage]))
   const userMap = new Map(users.map((user) => [String(user.id), user]))
   const categoryMap = new Map(categories.map((category) => [Number(category.id) || 0, category]))
@@ -79,7 +79,6 @@ export function buildAnalytics(deals, stages, users, categories = [], { truncate
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 15),
     totalDeals: normalized.length,
-    truncated,
   }
 }
 

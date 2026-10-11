@@ -4,18 +4,19 @@ const elements = Object.fromEntries([...document.querySelectorAll('[id]')].map((
 const formatters = new Map()
 const sortState = { key: 'createdAt', direction: 'desc' }
 let recentDeals = []
+let activeRequest = null
+let latestRequestId = 0
 
 initializePeriod(30)
 loadDashboard()
 
-elements['period-form'].addEventListener('submit', (event) => {
-  event.preventDefault()
-  document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active'))
-  loadDashboard()
-})
 elements.retry.addEventListener('click', loadDashboard)
+elements.category.addEventListener('change', loadDashboard)
 for (const input of [elements.from, elements.to]) {
-  input.addEventListener('change', () => document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active')))
+  input.addEventListener('change', () => {
+    document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active'))
+    loadDashboard()
+  })
 }
 document.querySelectorAll('.preset').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.preset').forEach((item) => item.classList.toggle('active', item === button))
@@ -31,26 +32,36 @@ document.querySelectorAll('.sort-button').forEach((button) => button.addEventLis
 }))
 
 async function loadDashboard() {
+  const requestId = ++latestRequestId
+  activeRequest?.abort()
+  activeRequest = null
   const from = elements.from.value
   const to = elements.to.value
   if (!from || !to || from > to) {
     showError('Дата начала должна быть не позже даты окончания.')
+    setLoading(false)
     return
   }
 
+  const controller = new AbortController()
+  activeRequest = controller
   setLoading(true)
   try {
     const category = elements.category.value
     const query = new URLSearchParams({ from, to })
     if (category !== '') query.set('categoryId', category)
-    const response = await fetch(`/api/dashboard?${query}`, { credentials: 'same-origin' })
+    const response = await fetch(`/api/dashboard?${query}`, { credentials: 'same-origin', signal: controller.signal })
     const body = await response.json().catch(() => null)
+    if (requestId !== latestRequestId) return
     if (!response.ok) throw new Error(errorMessage(body))
     render(body)
   } catch (error) {
-    showError(error.message)
+    if (requestId === latestRequestId && error.name !== 'AbortError') showError(error.message)
   } finally {
-    setLoading(false)
+    if (requestId === latestRequestId) {
+      activeRequest = null
+      setLoading(false)
+    }
   }
 }
 
@@ -74,9 +85,8 @@ function render(data) {
   renderRecent()
   elements.empty.classList.toggle('hidden', data.recent.length > 0)
   const warning = Array.isArray(data.warnings) ? data.warnings.find((item) => item?.message) : null
-  elements['status'].textContent = warning?.message || (data.truncated
-    ? 'Показаны первые 5 000 сделок. Сузьте период для точного итога.'
-    : `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`)
+  elements['status'].textContent = warning?.message ||
+    `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`
   notifyFrameHeight()
 }
 
@@ -103,7 +113,7 @@ function stageRow(stage) {
   row.innerHTML = `<span class="stage-dot"></span><div class="stage-main"><strong></strong><span></span></div><div class="stage-metric"><strong></strong><span></span></div>`
   row.querySelector('.stage-dot').style.background = stage.color
   row.querySelector('.stage-main strong').textContent = stage.name
-  row.querySelector('.stage-main span').textContent = `${stage.categoryName} · stageId: ${stage.stageId}`
+  row.querySelector('.stage-main span').textContent = stage.categoryName
   row.querySelector('.stage-metric strong').textContent = formatAmounts(stage.amounts)
   row.querySelector('.stage-metric span').textContent = plural(stage.count, 'сделка', 'сделки', 'сделок')
   return row
@@ -111,14 +121,28 @@ function stageRow(stage) {
 
 function dealRow(deal) {
   const row = document.createElement('tr')
-  const title = cell('deal-title', deal.title || `Сделка #${deal.id}`)
+  const title = document.createElement('td')
+  title.className = 'deal-title'
+  const titleText = deal.title || `Сделка #${deal.id}`
+  title.title = titleText
+  if (deal.detailUrl) {
+    const link = document.createElement('a')
+    link.href = deal.detailUrl
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    link.textContent = titleText
+    link.title = `Открыть сделку «${titleText}»`
+    title.append(link)
+  } else {
+    title.textContent = titleText
+  }
   const amount = cell('', formatMoney(deal.amount, deal.currency))
   const stageCell = document.createElement('td')
   const stage = document.createElement('span')
   stage.className = 'stage-chip'
   stage.style.setProperty('--stage-color', deal.stage.color)
   stage.textContent = deal.stage.name
-  stage.title = `stageId: ${deal.stage.id}`
+  stage.title = deal.stage.name
   stageCell.append(stage)
   const responsible = document.createElement('td')
   responsible.className = 'person-cell'
@@ -202,7 +226,7 @@ function localDate(date) {
 }
 
 function setLoading(loading) {
-  elements['period-form'].querySelector('button[type="submit"]').disabled = loading
+  elements['filter-controls'].setAttribute('aria-busy', String(loading))
   if (loading) {
     elements.status.textContent = 'Загружаем аналитику…'
     elements.error.classList.add('hidden')

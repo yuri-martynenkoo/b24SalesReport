@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Аналитика продаж</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=5">
+  <link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
   <main class="app-shell">
@@ -18,7 +18,7 @@
     </header>
 
     <section class="filter-card" aria-label="Фильтры сделок">
-      <form id="period-form" class="date-form">
+      <div id="filter-controls" class="date-form">
         <label>Направление
           <select id="category" name="categoryId"><option value="">Все направления</option></select>
         </label>
@@ -35,8 +35,7 @@
             </div>
           </div>
         </fieldset>
-        <button class="primary-button" type="submit">Применить</button>
-      </form>
+      </div>
     </section>
 
     <div id="status" class="status" role="status" aria-live="polite">Загружаем аналитику…</div>
@@ -56,13 +55,13 @@
           <span class="kpi-label">Количество открытых сделок</span>
           <strong id="open-count" class="kpi-value">—</strong>
         </article>
-        <article class="kpi-card accent-green">
-          <span class="kpi-label">Количество выигранных сделок</span>
-          <strong id="won-count" class="kpi-value">—</strong>
-        </article>
         <article class="kpi-card accent-teal">
           <span class="kpi-label">Сумма выигранных сделок</span>
           <strong id="won-amount" class="kpi-value">—</strong>
+        </article>
+        <article class="kpi-card accent-green">
+          <span class="kpi-label">Количество выигранных сделок</span>
+          <strong id="won-count" class="kpi-value">—</strong>
         </article>
         <article class="kpi-card accent-violet">
           <span class="kpi-label">Средний чек выигранных</span>
@@ -101,6 +100,6 @@
       </section>
     </div>
   </main>
-  <script type="module" src="/app.js?v=5"></script>
+  <script type="module" src="/app.js?v=7"></script>
 </body>
 </html>

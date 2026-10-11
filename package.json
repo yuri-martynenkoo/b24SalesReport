@@ -8,10 +8,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check public/app.js && node --test"
+    "check": "node --check src/server.js && node --check src/deals.js && node --check public/app.js && node --test"
   },
   "engines": {
     "node": ">=20"
   }
 }
-
