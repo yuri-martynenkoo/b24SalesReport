@@ -91,6 +91,9 @@ function render(data) {
 }
 
 function renderRecent() {
+  elements['recent-count'].textContent = recentDeals.length
+    ? `Последние сделки за период: ${plural(recentDeals.length, 'сделка', 'сделки', 'сделок')}`
+    : 'Сделок за период нет'
   elements.recent.replaceChildren(...sortDeals(recentDeals, sortState.key, sortState.direction).map(dealRow))
   for (const button of document.querySelectorAll('.sort-button')) {
     const direction = button.dataset.sort === sortState.key ? sortState.direction : null

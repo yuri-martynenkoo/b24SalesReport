@@ -5,7 +5,7 @@
 - Приложение: https://app-916c4e0a9320.vibecode.bitrix24.tech
 - Исходный код: https://github.com/yuri-martynenkoo/b24SalesReport
 - Краткие [материалы для проверки](SUBMISSION.md)
-- Действующая версия исходников VibeCode: `v7` (11.10.2026)
+- Действующая версия исходников VibeCode: `v8` (16.10.2026)
 
 ## Возможности
 
