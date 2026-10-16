@@ -1,4 +1,5 @@
 import { sortDeals } from './sort-deals.js'
+import { groupStagesByCategory } from './stage-groups.js'
 
 const elements = Object.fromEntries([...document.querySelectorAll('[id]')].map((element) => [element.id, element]))
 const formatters = new Map()
@@ -87,7 +88,7 @@ function render(data) {
     ? 'Все направления'
     : selectedCategory?.name || `Направление #${data.selectedCategoryId}`
 
-  elements.stages.replaceChildren(...data.stages.map(stageRow))
+  renderStages(data.stages, data.selectedCategoryId === null)
   recentDeals = Array.isArray(data.recent) ? data.recent : []
   renderRecent()
   elements.empty.classList.toggle('hidden', recentDeals.length > 0)
@@ -117,15 +118,59 @@ function errorMessage(body) {
   return 'Неизвестная ошибка. Попробуйте обновить данные.'
 }
 
+function renderStages(stages, showGroupNames) {
+  const groups = groupStagesByCategory(stages)
+  if (!groups.length) {
+    const empty = document.createElement('p')
+    empty.className = 'stage-empty'
+    empty.textContent = 'Сделок за выбранный период нет.'
+    elements.stages.replaceChildren(empty)
+    return
+  }
+  elements.stages.replaceChildren(...groups.map((group) => stageGroup(group, showGroupNames)))
+}
+
+function stageGroup(group, showName) {
+  const section = document.createElement('section')
+  section.className = 'stage-group'
+  if (showName) {
+    const heading = document.createElement('h3')
+    heading.className = 'stage-group-title'
+    heading.textContent = group.categoryName
+    section.append(heading)
+  }
+
+  const table = document.createElement('table')
+  table.className = 'stage-table'
+  table.setAttribute('aria-label', `Стадии направления «${group.categoryName}»`)
+  table.innerHTML = '<thead><tr><th scope="col">Стадия</th><th scope="col">Сделки</th><th scope="col">Сумма</th></tr></thead>'
+  const body = document.createElement('tbody')
+  body.replaceChildren(...group.stages.map(stageRow))
+  table.append(body)
+  section.append(table)
+  return section
+}
+
 function stageRow(stage) {
-  const row = document.createElement('article')
-  row.className = 'stage-row'
-  row.innerHTML = `<span class="stage-dot"></span><div class="stage-main"><strong></strong><span></span></div><div class="stage-metric"><strong></strong><span></span></div>`
-  row.querySelector('.stage-dot').style.background = stage.color
-  row.querySelector('.stage-main strong').textContent = stage.name
-  row.querySelector('.stage-main span').textContent = stage.categoryName
-  row.querySelector('.stage-metric strong').textContent = formatAmounts(stage.amounts)
-  row.querySelector('.stage-metric span').textContent = plural(stage.count, 'сделка', 'сделки', 'сделок')
+  const row = document.createElement('tr')
+  const name = document.createElement('td')
+  name.className = 'stage-name'
+  const dot = document.createElement('span')
+  dot.className = 'stage-dot'
+  dot.style.background = stage.color
+  dot.setAttribute('aria-hidden', 'true')
+  const title = document.createElement('span')
+  title.textContent = stage.name
+  name.append(dot, title)
+
+  const count = document.createElement('td')
+  count.className = 'stage-count'
+  count.textContent = new Intl.NumberFormat('ru-RU').format(stage.count)
+  const amount = document.createElement('td')
+  amount.className = 'stage-amount'
+  amount.textContent = formatAmounts(stage.amounts)
+  amount.classList.toggle('is-zero', Object.values(stage.amounts || {}).every((value) => Number(value) === 0))
+  row.append(name, count, amount)
   return row
 }
 

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Аналитика продаж</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=7">
+  <link rel="stylesheet" href="/styles.css?v=11">
 </head>
 <body>
   <main class="app-shell">
@@ -34,7 +34,7 @@
               <button class="preset" data-days="7" type="button">7 дней</button>
               <button class="preset active" data-days="30" type="button">30 дней</button>
               <button class="preset" data-days="90" type="button">90 дней</button>
-              <button class="preset" data-period="quarter" type="button">Квартал</button>
+              <button class="preset" data-period="quarter" type="button">Текущий квартал</button>
             </div>
           </div>
         </fieldset>
@@ -78,7 +78,7 @@
           <div><p class="eyebrow">Воронка</p><h2>Сводка по стадиям</h2><p id="selected-category-name" class="panel-subtitle">Все направления</p></div>
           <span id="deal-total" class="badge"></span>
         </div>
-        <div id="stages" class="stage-list"></div>
+        <div id="stages" class="stage-groups"></div>
       </section>
 
       <section class="panel">
@@ -103,6 +103,6 @@
       </section>
     </div>
   </main>
-  <script type="module" src="/app.js?v=9"></script>
+  <script type="module" src="/app.js?v=10"></script>
 </body>
 </html>
