@@ -42,6 +42,7 @@ async function handleDashboard(request, response, url) {
 
   const { from, to } = validatePeriod(url.searchParams.get('from'), url.searchParams.get('to'))
   const selectedCategoryId = validateCategory(url.searchParams.get('categoryId'))
+  const requestedResponsibleId = validateResponsible(url.searchParams.get('responsibleId'))
   const headers = { 'X-Api-Key': VIBE_APP_KEY, Authorization: `Bearer ${bearer}` }
   const [meEnvelope, categoriesEnvelope] = await Promise.all([
     vibeFetch('/v1/me', headers),
@@ -92,7 +93,7 @@ async function handleDashboard(request, response, url) {
   users = attachDepartmentNames(users, departments)
 
   const stages = stageResults.flatMap((result) => Array.isArray(result.value.data) ? result.value.data : [])
-  const analytics = buildAnalytics(deals, stages, users, categories)
+  const analytics = buildAnalytics(deals, stages, users, categories, requestedResponsibleId)
   analytics.recent = analytics.recent.map((deal) => ({
     ...deal,
     detailUrl: dealDetailUrl(identity.portal, deal.id),
@@ -117,6 +118,14 @@ async function handleDashboard(request, response, url) {
 function validateCategory(value) {
   if (value === null || value === '') return null
   if (!/^\d+$/.test(value)) throw publicError(400, 'INVALID_CATEGORY', 'Выберите корректное направление сделок.')
+  return Number(value)
+}
+
+function validateResponsible(value) {
+  if (value === null || value === '') return null
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
+    throw publicError(400, 'INVALID_RESPONSIBLE', 'Выберите корректного ответственного.')
+  }
   return Number(value)
 }
 

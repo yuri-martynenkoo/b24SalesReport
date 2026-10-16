@@ -11,7 +11,11 @@ initializePeriod(30)
 loadDashboard()
 
 elements.retry.addEventListener('click', loadDashboard)
-elements.category.addEventListener('change', loadDashboard)
+elements.category.addEventListener('change', () => {
+  elements.responsible.replaceChildren(option('', 'Все ответственные'))
+  loadDashboard()
+})
+elements.responsible.addEventListener('change', loadDashboard)
 for (const input of [elements.from, elements.to]) {
   input.addEventListener('change', () => {
     document.querySelectorAll('.preset').forEach((button) => button.classList.remove('active'))
@@ -48,8 +52,10 @@ async function loadDashboard() {
   setLoading(true)
   try {
     const category = elements.category.value
+    const responsible = elements.responsible.value
     const query = new URLSearchParams({ from, to })
     if (category !== '') query.set('categoryId', category)
+    if (responsible !== '') query.set('responsibleId', responsible)
     const response = await fetch(`/api/dashboard?${query}`, { credentials: 'same-origin', signal: controller.signal })
     const body = await response.json().catch(() => null)
     if (requestId !== latestRequestId) return
@@ -75,6 +81,7 @@ function render(data) {
   elements['average-amount'].textContent = formatAmounts(data.kpis.averageWonAmounts)
   elements['deal-total'].textContent = plural(data.totalDeals, 'сделка', 'сделки', 'сделок')
   renderCategoryOptions(data.categories, data.selectedCategoryId)
+  renderResponsibleOptions(data.responsibles, data.selectedResponsibleId)
   const selectedCategory = data.categories?.find((category) => Number(category.id) === data.selectedCategoryId)
   elements['selected-category-name'].textContent = data.selectedCategoryId === null
     ? 'Все направления'
@@ -83,7 +90,7 @@ function render(data) {
   elements.stages.replaceChildren(...data.stages.map(stageRow))
   recentDeals = Array.isArray(data.recent) ? data.recent : []
   renderRecent()
-  elements.empty.classList.toggle('hidden', data.recent.length > 0)
+  elements.empty.classList.toggle('hidden', recentDeals.length > 0)
   const warning = Array.isArray(data.warnings) ? data.warnings.find((item) => item?.message) : null
   elements['status'].textContent = warning?.message ||
     `Данные обновлены ${new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`
@@ -165,6 +172,13 @@ function renderCategoryOptions(categories, selectedCategoryId) {
   elements.category.value = selected
 }
 
+function renderResponsibleOptions(responsibles, selectedResponsibleId) {
+  const selected = selectedResponsibleId === null || selectedResponsibleId === undefined ? '' : String(selectedResponsibleId)
+  const options = [option('', 'Все ответственные'), ...(responsibles || []).map((item) => option(String(item.id), item.name))]
+  elements.responsible.replaceChildren(...options)
+  elements.responsible.value = selected
+}
+
 function option(value, label) {
   const item = document.createElement('option')
   item.value = value
@@ -230,6 +244,7 @@ function localDate(date) {
 
 function setLoading(loading) {
   elements['filter-controls'].setAttribute('aria-busy', String(loading))
+  elements.responsible.disabled = loading
   if (loading) {
     elements.status.textContent = 'Загружаем аналитику…'
     elements.error.classList.add('hidden')

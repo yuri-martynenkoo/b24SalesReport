@@ -9,7 +9,7 @@ export function amountByCurrency(items) {
   }, {})
 }
 
-export function buildAnalytics(deals, stages, users, categories = []) {
+export function buildAnalytics(deals, stages, users, categories = [], requestedResponsibleId = null) {
   const stageMap = new Map(stages.map((stage) => [stageKey(stage.categoryId, stage.statusId), stage]))
   const userMap = new Map(users.map((user) => [String(user.id), user]))
   const categoryMap = new Map(categories.map((category) => [Number(category.id) || 0, category]))
@@ -41,11 +41,22 @@ export function buildAnalytics(deals, stages, users, categories = []) {
     }
   })
 
-  const open = normalized.filter((deal) => deal.stage.semantics !== 'S' && deal.stage.semantics !== 'F')
-  const won = normalized.filter((deal) => deal.stage.semantics === 'S')
+  const responsibles = [...new Map(normalized.flatMap((deal) => {
+    const id = Number(deal.assignedById)
+    return Number.isSafeInteger(id) && id > 0 ? [[id, { id, name: deal.responsibleName }]] : []
+  })).values()].sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.id - b.id)
+  const selectedResponsibleId = responsibles.some((item) => item.id === requestedResponsibleId)
+    ? requestedResponsibleId
+    : null
+  const visible = selectedResponsibleId === null
+    ? normalized
+    : normalized.filter((deal) => Number(deal.assignedById) === selectedResponsibleId)
+
+  const open = visible.filter((deal) => deal.stage.semantics !== 'S' && deal.stage.semantics !== 'F')
+  const won = visible.filter((deal) => deal.stage.semantics === 'S')
   const grouped = new Map()
 
-  for (const deal of normalized) {
+  for (const deal of visible) {
     const key = stageKey(deal.categoryId, deal.stage.id)
     if (!grouped.has(key)) {
       grouped.set(key, {
@@ -67,6 +78,8 @@ export function buildAnalytics(deals, stages, users, categories = []) {
   }
 
   return {
+    responsibles,
+    selectedResponsibleId,
     kpis: {
       openCount: open.length,
       openAmounts: amountByCurrency(open),
@@ -75,10 +88,10 @@ export function buildAnalytics(deals, stages, users, categories = []) {
       averageWonAmounts: averagesByCurrency(won),
     },
     stages: [...grouped.values()].sort((a, b) => a.categoryId - b.categoryId || a.sort - b.sort),
-    recent: normalized
+    recent: visible
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 15),
-    totalDeals: normalized.length,
+    totalDeals: visible.length,
   }
 }
 

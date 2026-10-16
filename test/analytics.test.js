@@ -27,3 +27,41 @@ test('builds stage totals and KPIs using stage semantics', () => {
   assert.equal(result.recent.find((deal) => deal.assignedById === 7).responsibleDepartment, 'Отдел продаж')
   assert.equal(result.recent[0].categoryName, 'Общее')
 })
+
+test('responsible options follow the selected direction and period without filtering by default', () => {
+  const deals = [
+    { id: 1, title: 'A', amount: 100, currency: 'RUB', stageId: 'NEW', categoryId: 20, assignedById: 7, createdAt: '2026-10-10T10:00:00Z' },
+    { id: 2, title: 'B', amount: 200, currency: 'RUB', stageId: 'NEW', categoryId: 20, assignedById: 8, createdAt: '2026-10-11T10:00:00Z' },
+    { id: 3, title: 'C', amount: 300, currency: 'RUB', stageId: 'NEW', categoryId: 30, assignedById: 9, createdAt: '2026-10-11T10:00:00Z' },
+  ]
+  const stages = [
+    { categoryId: 20, statusId: 'NEW', name: 'Новая', semantics: 'P' },
+    { categoryId: 30, statusId: 'NEW', name: 'Новая', semantics: 'P' },
+  ]
+  const users = [
+    { id: 7, name: 'Иван', lastName: 'Иванов' },
+    { id: 8, name: 'Анна', lastName: 'Петрова' },
+    { id: 9, name: 'Пётр', lastName: 'Сидоров' },
+  ]
+  const categories = [{ id: 20, name: 'Авто' }, { id: 30, name: 'Услуги' }]
+  const autoDeals = deals.filter((deal) => deal.categoryId === 20)
+
+  const unfiltered = buildAnalytics(autoDeals, stages, users, categories)
+  assert.equal(unfiltered.selectedResponsibleId, null)
+  assert.equal(unfiltered.totalDeals, 2)
+  assert.deepEqual(unfiltered.responsibles.map((item) => item.id), [8, 7])
+
+  const selected = buildAnalytics(autoDeals, stages, users, categories, 7)
+  assert.equal(selected.selectedResponsibleId, 7)
+  assert.equal(selected.totalDeals, 1)
+  assert.equal(selected.kpis.openCount, 1)
+  assert.deepEqual(selected.kpis.openAmounts, { RUB: 100 })
+  assert.equal(selected.stages[0].count, 1)
+  assert.deepEqual(selected.recent.map((deal) => deal.id), [1])
+  assert.deepEqual(selected.responsibles.map((item) => item.id), [8, 7])
+
+  const otherDirection = buildAnalytics(deals.filter((deal) => deal.categoryId === 30), stages, users, categories, 7)
+  assert.equal(otherDirection.selectedResponsibleId, null)
+  assert.deepEqual(otherDirection.responsibles.map((item) => item.id), [9])
+  assert.equal(otherDirection.totalDeals, 1)
+})
