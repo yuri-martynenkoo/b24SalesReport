@@ -56,7 +56,34 @@ npm run check
 
 ## Развёртывание VibeCode
 
-1. Создайте OAuth-приложение VibeCode с перечисленными скоупами и сохраните `vibe_app_…` как серверный секрет `vibe_app_local`. Не включайте ключ в репозиторий или архив. Вызовы платформы отправляйте с ключом в `X-Api-Key`; `Authorization` используется только для пользовательской сессии.
-2. Разверните архив корня проекта на Black Hole server: `runtime: node20`, `port: 3000`, `start: node src/server.js`, `healthPath: /health`, `hardening: auto`. Для повторного деплоя на действующий сервер сохраняйте `serviceName: sales-report` и `.env` (`preserveEnv: true`), а также указывайте фактическую базовую версию исходников. См. [Deploy API](https://vibecode.bitrix24.tech/docs/infra/deploy/deploy).
-3. Опубликуйте приложение с URL сервера и авторизуйте его на портале. В действующей установке приложение уже опубликовано; не добавляйте второй `LEFT_MENU`, чтобы не получить два одноимённых пункта.
-4. Проверьте успешный `/health` от сервиса и откройте «Дашборд продаж» в Битрикс24 под сотрудником с доступом к CRM. Выберите направление, ответственного и период, сравните KPI и стадии с CRM, откройте карточку сделки по названию.
+Ниже — порядок **нового развёртывания на своём портале**, а не команда обновления действующей установки автора. Нужны доступ к VibeCode на этом портале, право создавать приложения и серверы, личный ключ `vibe_api_…` для управляющих вызовов и Git/PowerShell для примера ниже. Тарифы и доступные конфигурации сервера зависят от портала. Проверяющему без собственного портала достаточно изучить код и выполнить `npm run check`; живые данные CRM без авторизации пользователя недоступны.
+
+1. **Создайте свой сервер Black Hole.** В кабинете VibeCode выберите отдельный сервер (`STANDALONE`, не Galaxy), доступные провайдер и план. Эквивалентный API-маршрут — [`POST /v1/infra/servers`](https://vibecode.bitrix24.tech/docs/infra/servers/create), с полями `name`, `provider`, `plan` и `placement: "dedicated"`. Дождитесь `status: running` и `blackholeStatus: CONNECTED` через `GET /v1/infra/servers/:id`. Запишите **свой** UUID сервера и URL вида `https://app-….vibecode.bitrix24.tech`; UUID из исходного кода относится к установке автора.
+2. **Создайте OAuth-приложение** на том же портале: [`POST /v1/apps`](https://vibecode.bitrix24.tech/docs/apps/create) с названием, `appUrl` вашего сервера и скоупами `crm`, `user`, `department`, `placement`. Проверьте по `GET /v1/me` права парного ключа; для резервного серверного поиска сотрудников нужен также `vibe:infra`. Сохраните одноразово выданный ключ `vibe_app_…` вне репозитория. В разделе `/applications` найдите карточку, которая показывает **именно ваш сервер** (сверьте его ID), и в ней создайте секрет `vibe_app_local` со значением ключа: платформа передаёт [секреты карточки приложения](https://vibecode.bitrix24.tech/docs/applications/app-secrets) в процесс связанного сервера. Если карточка показывает другой сервер или сервер не связан, остановитесь и исправьте привязку до деплоя. Значения секретов через API не передаются. `VIBE_APP_KEY` в коде — лишь локальный alias: имена `VIBE_*` как секреты платформа не принимает. Если раздел секретов на портале недоступен, настройте защищённую переменную окружения службы отдельно, не помещая ключ в архив, Git или пример команды деплоя.
+3. **Подготовьте архив исходников из своего checkout и разверните его.** Из корня репозитория выполните `npm run check`, затем команды PowerShell ниже. Для платформы это [`POST /v1/infra/servers/:id/deploy`](https://vibecode.bitrix24.tech/docs/infra/deploy/deploy): обязательны `source` и `start`; при включённом хранилище `source.content` сохраняет снимок исходников для последующей публикации. Личный ключ идёт **только** в `X-Api-Key`. Не подставляйте ID сервера автора.
+
+   ```powershell
+   $projectServerId = '<UUID вашего сервера>'
+   $projectApiKey = [pscredential]::new('key', (Read-Host 'Личный ключ VibeCode (vibe_api_...)' -AsSecureString)).GetNetworkCredential().Password
+   $projectArchive = Join-Path ([IO.Path]::GetTempPath()) 'b24-sales-report.tar.gz'
+   git archive --format=tar.gz --output=$projectArchive HEAD
+   $projectBody = @{
+     source = @{ content = [Convert]::ToBase64String([IO.File]::ReadAllBytes($projectArchive)) }
+     runtime = 'node20'
+     start = 'cd /opt/app && node src/server.js'
+     port = 3000
+     healthPath = '/health'
+     serviceName = 'sales-report'
+     env = @{ VIBE_SERVER_ID = $projectServerId }
+   } | ConvertTo-Json -Depth 6
+   $projectDeploy = Invoke-RestMethod -Method Post `
+     -Uri "https://vibecode.bitrix24.tech/v1/infra/servers/$projectServerId/deploy" `
+     -Headers @{ 'X-Api-Key' = $projectApiKey } `
+     -ContentType 'application/json' -Body $projectBody -TimeoutSec 600
+   if (-not $projectDeploy.success) { throw "Деплой не завершён: $($projectDeploy.error.code)" }
+   $projectDeploy.data.appUrl
+   ```
+
+   Этот пример относится к **первой выкладке на отдельный сервер**. Для Galaxy часть полей (`serviceName`, `preserveEnv`, `hardening`) не действует, а порядок создания отличается — используйте [инструкцию платформы](https://vibecode.bitrix24.tech/docs/infra/servers/create). При повторной выкладке не меняйте `serviceName`; если используете собственный `.env` на отдельном сервере, сохраняйте его явно (`preserveEnv: true`). Секрет карточки приложения доставляется отдельно от `.env`. Код читает `VIBE_SERVER_ID` для резервного поиска ответственных: на чужом сервере его необходимо заменить.
+4. **Авторизуйте и опубликуйте приложение.** Если при публикации платформа сообщает `NO_USER_TOKEN`, пройдите [OAuth-авторизацию приложения](https://vibecode.bitrix24.tech/docs/keys-auth/oauth) на своём портале. Затем вызовите [`POST /v1/apps/:id/publish`](https://vibecode.bitrix24.tech/docs/apps/publish) с `appUrl` своего сервера и `placements: []`: отдельный `LEFT_MENU` создаёт второй одноимённый пункт. Если хранилище исходников включено и снимок деплоя принадлежит серверу, укажите `sourceServerId` этого сервера; при `SNAPSHOT_REQUIRED` следуйте `hint` ответа. Публикация и деплой — разные операции. Управляющие запросы отправляйте с ключом в `X-Api-Key`; `Authorization: Bearer` нужен только там, где документация требует пользовательскую OAuth-сессию.
+5. **Проверьте результат.** У деплоя должен быть `success: true`, у `GET <appUrl>/health` — ответ `200`. Откройте приложение **из Битрикс24** под сотрудником с правом чтения CRM: убедитесь, что данные загрузились, затем проверьте фильтры, KPI, стадии, сортировку и ссылку на карточку сделки. Успешный `/health` или загрузка HTML по прямому URL без сессии не доказывают доступ к CRM.
