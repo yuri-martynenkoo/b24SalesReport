@@ -2,8 +2,8 @@ import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildAnalytics } from './analytics.js'
-import { dealDetailUrl, fetchAllDeals } from './deals.js'
+import { dealDetailUrl } from './deals.js'
+import { buildAggregatedAnalytics, fetchReportData } from './report.js'
 
 const PORT = Number(process.env.PORT) || 3000
 const VIBE_API = process.env.VIBE_API_URL || 'https://vibecode.bitrix24.tech'
@@ -19,7 +19,7 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === '/health') return json(response, 200, { ok: true })
     if (url.pathname === '/api/dashboard') return await handleDashboard(request, response, url)
     if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed' })
-    return serveStatic(response, url.pathname, request.method === 'HEAD')
+    return await serveStatic(response, url.pathname, request.method === 'HEAD')
   } catch (error) {
     console.error('request_failed', safeError(error))
     return json(response, error.statusCode || 500, {
@@ -44,17 +44,25 @@ async function handleDashboard(request, response, url) {
   const selectedCategoryId = validateCategory(url.searchParams.get('categoryId'))
   const requestedResponsibleId = validateResponsible(url.searchParams.get('responsibleId'))
   const headers = { 'X-Api-Key': VIBE_APP_KEY, Authorization: `Bearer ${bearer}` }
-  const [meEnvelope, categoriesEnvelope] = await Promise.all([
+  const [meEnvelope, categoriesEnvelope, currenciesEnvelope] = await Promise.all([
     vibeFetch('/v1/me', headers),
     vibeFetch('/v1/categories/2?limit=500&sort=sort&select=id,name,sort,isDefault', headers),
+    vibeFetch('/v1/currencies?limit=500&select=id', headers),
   ])
   const identity = meEnvelope.data || {}
   const categories = normalizeCategories(categoriesEnvelope.data)
-
-  const deals = await fetchAllDeals((path) => vibeFetch(path, headers, 60_000), {
-    from, to, categoryId: selectedCategoryId,
-  })
-  const categoryIds = [...new Set(deals.map((deal) => Number(deal.categoryId) || 0))]
+  const currencies = [...new Set((Array.isArray(currenciesEnvelope.data) ? currenciesEnvelope.data : [])
+    .map((currency) => String(currency.id || '').toUpperCase()).filter((currency) => /^[A-Z]{3}$/.test(currency)))]
+  if (!currencies.length || currenciesEnvelope.meta?.hasMore) {
+    throw publicError(502, 'CURRENCY_LIST_INCOMPLETE', 'Не удалось получить полный список валют портала.')
+  }
+  const report = await fetchReportData(
+    (body) => vibeFetch('/v1/deals/aggregate', headers, 60_000, body),
+    (path) => vibeFetch(path, headers, 30_000),
+    { from, to, categoryId: selectedCategoryId, requestedResponsibleId, currencies },
+  )
+  const categoryIds = [...new Set([...report.stageResults.flatMap((item) => item.groups.map((group) => Number(group.categoryId) || 0)),
+    ...report.recent.map((deal) => Number(deal.categoryId) || 0)])]
 
   const [usersResult, departmentsResult, ...stageResults] = await Promise.allSettled([
     vibeFetch('/v1/users?limit=5000&select=id,name,lastName,secondName,departmentId,workPosition', headers),
@@ -75,8 +83,7 @@ async function handleDashboard(request, response, url) {
   if (usersResult.status === 'fulfilled') {
     users = Array.isArray(usersResult.value.data) ? usersResult.value.data : users
   } else if (usersResult.reason?.code === 'SCOPE_DENIED') {
-    const recentDeals = [...deals].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 15)
-    const assignedIds = [...new Set(recentDeals.map((deal) => String(deal.assignedById || '')).filter(Boolean))]
+    const assignedIds = [...new Set(report.recent.map((deal) => String(deal.assignedById || '')).filter(Boolean))]
     const fallbackUsers = await fetchBasicUsers(assignedIds)
     users = mergeUsers(users, fallbackUsers)
     responsibleNamesAvailable = fallbackUsers.length > 0
@@ -93,7 +100,7 @@ async function handleDashboard(request, response, url) {
   users = attachDepartmentNames(users, departments)
 
   const stages = stageResults.flatMap((result) => Array.isArray(result.value.data) ? result.value.data : [])
-  const analytics = buildAnalytics(deals, stages, users, categories, requestedResponsibleId)
+  const analytics = buildAggregatedAnalytics(report, stages, users, categories)
   analytics.recent = analytics.recent.map((deal) => ({
     ...deal,
     detailUrl: dealDetailUrl(identity.portal, deal.id),
@@ -167,8 +174,13 @@ function attachDepartmentNames(users, departments) {
   })
 }
 
-async function vibeFetch(path, headers, timeoutMs = 30_000) {
-  const upstream = await fetch(`${VIBE_API}${path}`, { headers, signal: AbortSignal.timeout(timeoutMs) })
+async function vibeFetch(path, headers, timeoutMs = 30_000, requestBody = null) {
+  const upstream = await fetch(`${VIBE_API}${path}`, {
+    method: requestBody === null ? 'GET' : 'POST',
+    headers: requestBody === null ? headers : { ...headers, 'Content-Type': 'application/json' },
+    body: requestBody === null ? undefined : JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
   const body = await upstream.json().catch(() => null)
   if (!upstream.ok || body?.success === false) {
     const error = publicError(upstream.status || 502, body?.error?.code || 'VIBE_API_ERROR', mapUpstreamMessage(upstream.status, body))
@@ -205,9 +217,8 @@ async function serveStatic(response, pathname, headOnly) {
       'X-Content-Type-Options': 'nosniff',
     })
     response.end(headOnly ? undefined : body)
-  } catch (error) {
-    if (error.code === 'ENOENT') return json(response, 404, { error: 'Not found' })
-    throw error
+  } catch {
+    return json(response, 404, { error: 'Not found' })
   }
 }
 
