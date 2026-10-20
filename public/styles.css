@@ -45,13 +45,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .accent-violet { --kpi-background: #faf8fd; }
 .kpi-label { display: block; color: #526174; font-size: 13px; font-weight: 700; line-height: 1.35; }
 .kpi-value { display: block; margin-top: auto; overflow-wrap: anywhere; color: #172033; font-size: clamp(20px, 2vw, 27px); letter-spacing: -.035em; line-height: 1.15; }
-.kpi-note { display: block; margin-top: 4px; color: #526174; font-size: 12px; }
 .panel { margin-top: 16px; padding: 22px; border-radius: 18px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .panel-subtitle { margin-top: 7px; color: #526174; font-size: 13px; }
 .badge { border-radius: 999px; padding: 7px 11px; color: #4d5d72; background: #f1f4f7; font-size: 12px; font-weight: 750; }
+.stage-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.stage-action { min-height: 34px; padding: 5px 10px; border: 1px solid #d4dde7; border-radius: 8px; color: #415269; background: #fff; font-size: 12px; font-weight: 650; }
+.stage-action:hover { border-color: #9bc9e6; color: #0b74bd; }
+.stage-action:disabled { opacity: .5; cursor: default; }
 .stage-group + .stage-group { margin-top: 18px; padding-top: 18px; border-top: 1px solid #dce4ec; }
-.stage-group-title { margin: 0 0 9px; color: #334155; font-size: 15px; font-weight: 750; }
+.stage-group-title { color: #334155; font-size: 15px; font-weight: 750; cursor: pointer; }
+.stage-group-title::marker { color: #0b74bd; }
+.stage-group-title:focus-visible { outline: 3px solid rgba(31,169,232,.3); outline-offset: 2px; border-radius: 4px; }
+.stage-group[open] .stage-group-title { margin-bottom: 9px; }
 .stage-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .stage-table th { padding: 9px 12px; color: #526174; background: #f5f8fb; font-size: 11px; }
 .stage-table th:first-child { width: 59%; border-radius: 8px 0 0 8px; }
@@ -97,6 +103,7 @@ td { max-width: 270px; padding: 15px 12px; border-top: 1px solid #edf1f5; color:
   .date-form > label, .period-controls label { flex-basis: 100%; }
   .kpi-grid { grid-template-columns: 1fr; }
   .panel-heading { align-items: start; flex-direction: column; }
+  .stage-actions { justify-content: flex-start; }
   .kpi-card, .panel { padding: 17px; }
   .kpi-card { min-height: 0; }
   .kpi-value { margin-top: 12px; }

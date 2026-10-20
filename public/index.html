@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Аналитика продаж</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=11">
+  <link rel="stylesheet" href="/styles.css?v=12">
 </head>
 <body>
   <main class="app-shell">
@@ -69,14 +69,17 @@
         <article class="kpi-card accent-violet">
           <span class="kpi-label">Средний чек выигранных</span>
           <strong id="average-amount" class="kpi-value">—</strong>
-          <span class="kpi-note">за выбранный период</span>
         </article>
       </section>
 
       <section class="panel stage-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">Воронка</p><h2>Сводка по стадиям</h2><p id="selected-category-name" class="panel-subtitle">Все направления</p></div>
-          <span id="deal-total" class="badge"></span>
+          <div class="stage-actions">
+            <button id="expand-stages" class="stage-action" type="button">Развернуть все</button>
+            <button id="collapse-stages" class="stage-action" type="button">Свернуть все</button>
+            <span id="deal-total" class="badge"></span>
+          </div>
         </div>
         <div id="stages" class="stage-groups"></div>
       </section>
@@ -103,6 +106,6 @@
       </section>
     </div>
   </main>
-  <script type="module" src="/app.js?v=10"></script>
+  <script type="module" src="/app.js?v=11"></script>
 </body>
 </html>

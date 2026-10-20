@@ -32,6 +32,12 @@ test('static route returns 404 for nested file path and an overlong path', async
       const response = await fetch(`http://127.0.0.1:${port}${path}`)
       assert.equal(response.status, 404)
     }
+    for (const query of ['from=2026-02-31&to=2026-03-01', 'from=2026-03-01&to=2026-03-02&categoryId=9007199254740993']) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/dashboard?${query}`, {
+        headers: { 'X-Vibe-Authorization': 'Bearer vibe_session_test' },
+      })
+      assert.equal(response.status, 400)
+    }
   } finally {
     child.kill()
   }

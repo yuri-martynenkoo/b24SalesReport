@@ -7,11 +7,14 @@ const sortState = { key: 'createdAt', direction: 'desc' }
 let recentDeals = []
 let activeRequest = null
 let latestRequestId = 0
+const collapsedCategories = new Set()
 
 initializePeriod(30)
 loadDashboard()
 
 elements.retry.addEventListener('click', loadDashboard)
+elements['expand-stages'].addEventListener('click', () => setAllStageGroupsExpanded(true))
+elements['collapse-stages'].addEventListener('click', () => setAllStageGroupsExpanded(false))
 elements.category.addEventListener('change', () => {
   elements.responsible.replaceChildren(option('', 'Все ответственные'))
   loadDashboard()
@@ -88,7 +91,7 @@ function render(data) {
     ? 'Все направления'
     : selectedCategory?.name || `Направление #${data.selectedCategoryId}`
 
-  renderStages(data.stages, data.selectedCategoryId === null)
+  renderStages(data.stages)
   recentDeals = Array.isArray(data.recent) ? data.recent : []
   renderRecent()
   elements.empty.classList.toggle('hidden', recentDeals.length > 0)
@@ -118,8 +121,10 @@ function errorMessage(body) {
   return 'Неизвестная ошибка. Попробуйте обновить данные.'
 }
 
-function renderStages(stages, showGroupNames) {
+function renderStages(stages) {
   const groups = groupStagesByCategory(stages)
+  elements['expand-stages'].disabled = groups.length === 0
+  elements['collapse-stages'].disabled = groups.length === 0
   if (!groups.length) {
     const empty = document.createElement('p')
     empty.className = 'stage-empty'
@@ -127,18 +132,23 @@ function renderStages(stages, showGroupNames) {
     elements.stages.replaceChildren(empty)
     return
   }
-  elements.stages.replaceChildren(...groups.map((group) => stageGroup(group, showGroupNames)))
+  elements.stages.replaceChildren(...groups.map(stageGroup))
 }
 
-function stageGroup(group, showName) {
-  const section = document.createElement('section')
-  section.className = 'stage-group'
-  if (showName) {
-    const heading = document.createElement('h3')
-    heading.className = 'stage-group-title'
-    heading.textContent = group.categoryName
-    section.append(heading)
-  }
+function stageGroup(group) {
+  const details = document.createElement('details')
+  details.className = 'stage-group'
+  details.dataset.categoryId = String(group.categoryId)
+  details.open = !collapsedCategories.has(details.dataset.categoryId)
+  const summary = document.createElement('summary')
+  summary.className = 'stage-group-title'
+  summary.textContent = group.categoryName
+  details.append(summary)
+  details.addEventListener('toggle', () => {
+    if (details.open) collapsedCategories.delete(details.dataset.categoryId)
+    else collapsedCategories.add(details.dataset.categoryId)
+    notifyFrameHeight()
+  })
 
   const table = document.createElement('table')
   table.className = 'stage-table'
@@ -147,8 +157,17 @@ function stageGroup(group, showName) {
   const body = document.createElement('tbody')
   body.replaceChildren(...group.stages.map(stageRow))
   table.append(body)
-  section.append(table)
-  return section
+  details.append(table)
+  return details
+}
+
+function setAllStageGroupsExpanded(expanded) {
+  for (const group of elements.stages.querySelectorAll('.stage-group')) {
+    if (expanded) collapsedCategories.delete(group.dataset.categoryId)
+    else collapsedCategories.add(group.dataset.categoryId)
+    group.open = expanded
+  }
+  notifyFrameHeight()
 }
 
 function stageRow(stage) {

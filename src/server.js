@@ -124,7 +124,9 @@ async function handleDashboard(request, response, url) {
 
 function validateCategory(value) {
   if (value === null || value === '') return null
-  if (!/^\d+$/.test(value)) throw publicError(400, 'INVALID_CATEGORY', 'Выберите корректное направление сделок.')
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw publicError(400, 'INVALID_CATEGORY', 'Выберите корректное направление сделок.')
+  }
   return Number(value)
 }
 
@@ -195,7 +197,10 @@ function validatePeriod(from, to) {
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
   const safeFrom = from || defaultFrom
   const safeTo = to || today
-  if (!datePattern.test(safeFrom) || !datePattern.test(safeTo) || safeFrom > safeTo) {
+  const isCalendarDate = (value) => datePattern.test(value) &&
+    !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  if (!isCalendarDate(safeFrom) || !isCalendarDate(safeTo) || safeFrom > safeTo) {
     throw publicError(400, 'INVALID_PERIOD', 'Проверьте выбранный период: дата начала должна быть не позже даты окончания.')
   }
   return { from: safeFrom, to: safeTo }
